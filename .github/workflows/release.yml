@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release & Sign
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Set version
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          "VERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        shell: pwsh
+        run: |
+          go build -ldflags "-X vibeark/internal/version.Value=$env:VERSION" -o dist/vibeark.exe .
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: Sign with Cosign
+        shell: pwsh
+        run: |
+          cosign sign-blob --yes --output-signature dist/vibeark.exe.sig --output-certificate dist/vibeark.exe.pem dist/vibeark.exe
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            --title "VibeArk ${{ env.VERSION }}" `
+            --notes "VibeArk ${{ env.VERSION }} — Portable App Manager for Windows x64" `
+            dist/vibeark.exe `
+            dist/vibeark.exe.sig `
+            dist/vibeark.exe.pem
